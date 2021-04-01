@@ -2,13 +2,41 @@
 
 main:
 
-	li $s3, 8								# size
+	# print "size: "
+	li $v0, 4								
+	la $a0, str_size
+	syscall
+
+	# read size
+	li $v0, 5
+	syscall
+	move $s3, $v0
+
+	# print "enter: "
+	li $v0, 4								
+	la $a0, str_enter
+	syscall
+
+	# get integers
+	la $t5, arr
+	li $t0, 0
+readLoop:
+	bge $t0, $s3, readLoopExit
+	li $v0, 5
+	syscall
+	sw $v0, 0($t5)
+	addi $t5, $t5, 4
+	addi $t0, $t0, 1
+	j readLoop
+readLoopExit:
+
+#	li $s3, 8								# size
 	addi $t0, $s3 -1				# size - 2
 
 L1:
 	li $t2, 0							# changed = false 
 	li $t3, 0							# i = 0
-	la $t5, test1
+	la $t5, arr
 L2:
 	bge $t3, $t0, L2Exit
 
@@ -26,7 +54,7 @@ L2Exit:
 
 	bne $t2, $zero, L1 				# while(changed)
 
-	la $a0, test1 					# arr
+	la $a0, arr 					# arr
 	move $a1, $s3 					# size
 	jal printArr 						# print(arr, size)
 
