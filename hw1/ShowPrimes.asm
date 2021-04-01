@@ -3,7 +3,7 @@
 main:
 
 	li, $s0, 1							# i
-	li, $s1, 100						# n
+	li, $s1, 1000						# n
 
 L1: 
 	li $v0,1								# print integer
