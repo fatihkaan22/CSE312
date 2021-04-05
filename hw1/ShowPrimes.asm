@@ -2,7 +2,7 @@
 
 main:
 
-	li, $s0, 1							# i
+	li, $s0, 0							# i
 	li, $s1, 1000						# n
 
 L1: 

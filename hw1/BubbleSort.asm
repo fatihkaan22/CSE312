@@ -58,6 +58,11 @@ L2Exit:
 	move $a1, $s3 					# size
 	jal printArr 						# print(arr, size)
 
+	# print new line
+	li $v0, 4								
+	la $a0, str_newline
+	syscall
+
 	j exit
 
 exit:
@@ -98,3 +103,4 @@ arr:	.space	400					# MAX_SIZE=100
 str_space:	.asciiz " "
 str_size:	.asciiz "Enter number of integers: "
 str_enter:	.asciiz "Enter integers: "
+str_newline: .asciiz "\n"
