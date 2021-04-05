@@ -60,3 +60,5 @@ void handle_exception ();
 
 #define EXIT2_SYSCALL		17
 
+#define CREATE_PROCESS_SYSCALL		18
+
