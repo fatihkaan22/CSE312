@@ -51,6 +51,8 @@
 #include "mem.h"
 #include "sym-tbl.h"
 #include "syscall.h"
+#include "run.h"
+#include "spim-utils.h"
 
 
 #ifdef _WIN32
@@ -249,6 +251,125 @@ do_syscall ()
 	break;
       }
 
+		case CREATE_PROCESS_SYSCALL:
+			{
+			// init backup variables, taken from mem.cpp
+			reg_word R_bak[R_LENGTH];
+			reg_word HI_bak, LO_bak;
+			mem_addr PC_bak, nPC_bak;
+			double *FPR_bak;
+			float *FGR_bak;
+			int *FWR_bak;
+			reg_word CCR_bak[4][32], CPR_bak[4][32];
+			instruction **text_seg_bak;
+			bool text_modified_bak;
+			mem_addr text_top_bak;
+			mem_word *data_seg_bak;
+			bool data_modified_bak;
+			short *data_seg_h_bak;
+			BYTE_TYPE *data_seg_b_bak;
+			mem_addr data_top_bak;
+			mem_addr gp_midpoint_bak;
+			mem_word *stack_seg_bak;
+			short *stack_seg_h_bak;	
+			BYTE_TYPE *stack_seg_b_bak;
+			mem_addr stack_bot_bak;
+			instruction **k_text_seg_bak;
+			mem_addr k_text_top_bak;
+			mem_word *k_data_seg_bak;
+			short *k_data_seg_h_bak;
+			BYTE_TYPE *k_data_seg_b_bak;
+			mem_addr k_data_top_bak;
+
+			// Copy backup variables
+			memcpy(&R_bak, &R, sizeof(R));
+			HI_bak = HI;
+			LO_bak = LO;
+			PC_bak = PC;
+			nPC_bak = nPC;
+			FPR_bak = FPR;
+			FGR_bak = FGR;
+			FWR_bak = FWR;
+			memcpy(&CCR_bak, &CCR, sizeof(CCR));
+			memcpy(&CPR_bak, &CPR, sizeof(CPR));
+			text_seg_bak = text_seg;
+			text_modified_bak = text_modified;
+			text_top_bak = text_top;
+			data_seg_bak = data_seg;
+			data_modified_bak = data_modified;
+			data_seg_h_bak = data_seg_h;
+			data_seg_b_bak = data_seg_b;
+			data_top_bak = data_top;
+			gp_midpoint_bak = gp_midpoint;
+			stack_seg_bak = stack_seg;
+			stack_seg_h_bak = stack_seg_h;
+			stack_seg_b_bak = stack_seg_b;
+			stack_bot_bak = stack_bot;
+			k_text_seg_bak = k_text_seg;
+			k_text_top_bak = k_text_top;
+			k_data_seg_bak = k_data_seg;
+			k_data_seg_h_bak = k_data_seg_h;
+			k_data_seg_b_bak = k_data_seg_b;
+			k_data_top_bak = k_data_top;
+
+			char** args = (char**)malloc(sizeof(char*));
+			args[0] = (char*) malloc(256*sizeof(char));
+			args[0] = (char*) mem_reference(R[REG_A0]); // filename
+
+			text_seg = NULL;
+			data_seg = NULL;
+			data_seg_h = NULL;
+			data_seg_b = NULL;
+			stack_seg = NULL;
+			stack_seg_h = NULL;
+			stack_seg_b = NULL;
+			k_text_seg = NULL;
+			k_data_seg = NULL;
+			k_data_seg_h = NULL;
+			k_data_seg_b = NULL;
+			FPR = NULL;
+			FGR = NULL;
+			FWR = NULL;
+
+			// handle create_process syscall
+			bool continuable; // required for run_program()
+			initialize_world(exception_file_name, false);
+			read_assembly_file(args[0]);
+			run_program(find_symbol_address(DEFAULT_RUN_LOCATION), DEFAULT_RUN_STEPS, false, false, &continuable);
+
+			// recover state
+			memcpy(&R, &R_bak, sizeof(R));
+			HI = HI_bak;
+			LO = LO_bak;
+			PC = PC_bak;
+			nPC = nPC_bak;
+			FPR = FPR_bak;
+			FGR = FGR_bak;
+			FWR = FWR_bak;
+			memcpy(&CCR, &CCR_bak, sizeof(CCR));
+			memcpy(&CPR, &CPR_bak, sizeof(CPR));
+			text_seg = text_seg_bak;
+			text_modified = text_modified_bak;
+			text_top = text_top_bak;
+			data_seg = data_seg_bak;
+			data_modified = data_modified_bak;
+			data_seg_h = data_seg_h_bak;
+			data_seg_b = data_seg_b_bak;
+			data_top = data_top_bak;
+			gp_midpoint = gp_midpoint_bak;
+			stack_seg = stack_seg_bak;
+			stack_seg_h = stack_seg_h_bak;
+			stack_seg_b = stack_seg_b_bak;
+			stack_bot = stack_bot_bak;
+			k_text_seg = k_text_seg_bak;
+			k_text_top = k_text_top_bak;
+			k_data_seg = k_data_seg_bak;
+			k_data_seg_h = k_data_seg_h_bak;
+			k_data_seg_b = k_data_seg_b_bak;
+			k_data_top = k_data_top_bak;
+			free(args);
+			break;
+			}
     default:
       run_error ("Unknown system call: %d\n", R[REG_V0]);
       break;
@@ -261,8 +382,7 @@ do_syscall ()
 }
 
 
-void
-handle_exception ()
+void handle_exception ()
 {
   if (!quiet && CP0_ExCode != ExcCode_Int)
     error ("Exception occurred at PC=0x%08x\n", CP0_EPC);
