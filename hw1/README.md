@@ -4,6 +4,7 @@
 - `-mno-explicit-relocs` compiler flag is used, since SPIM doesn't allow %hi and %lo registers.
 - Comments and unused lables are filtered from the output.
 - Directives filtered from output. `.data` and `.text` segments added to assembly file, in order to avoid unsupported directives.
+- `.ascii` converted to `.asciiz`.
 - `syscall.cpp` and `syscall.h` changed, so that it can handle `create_process` syscall. It saves the state of the program, runs desired asm file and resotres the state back.
 
 Shell will print the prompt and waits for user to write the filename to run.
@@ -43,6 +44,12 @@ Enter number: 20
 
 ```
 [shell]> run BubbleSort.asm
+Enter number of integers: 4
+Enter integers: 8
+1
+-2
+7
+-2 1 7 8 
 ```
 
 ## exit
