@@ -36,6 +36,29 @@ void SPIM_timerHandler();
 int do_syscall ();
 void handle_exception ();
 
+enum thread_state { READY, RUNNING, BLOCKED, TERMINATED };
+static const char* thread_state_str[] = {"READY", "RUNNING", "BLOCKED", "TERMINATED"};
+
+typedef struct thread {
+  int thread_id;
+  reg_word R[R_LENGTH];
+	reg_word HI_bak, LO_bak;
+  // NOTE: consider adding FPR, FGR, FWR, CCR, CPR
+  mem_addr PC;
+  // NOTE: consider removing unnecassary stack variables
+  mem_word *stack_seg;
+  short *stack_seg_h;
+  BYTE_TYPE *stack_seg_b;
+  mem_addr stack_bot;
+	thread_state state;
+}thread;
+
+void switch_thread();
+void init_table();
+struct thread* new_thread(int);
+struct thread* get_thread(int thread_id);
+void print_thread_table();
+
 #define PRINT_INT_SYSCALL	1
 #define PRINT_FLOAT_SYSCALL	2
 #define PRINT_DOUBLE_SYSCALL	3
@@ -60,8 +83,8 @@ void handle_exception ();
 
 #define EXIT2_SYSCALL		17
 
-#define T_CREATE 18
-#define T_JOIN 19
-#define T_EXIT 20
-#define T_MUTEX_LOCK 21
-#define T_MUTEX_UNLOCK 22
+#define T_CREATE_SYSCALL 18
+#define T_JOIN_SYSCALL 19
+#define T_EXIT_SYSCALL 20
+#define T_MUTEX_LOCK_SYSCALL 21
+#define T_MUTEX_UNLOCK_SYSCALL 22

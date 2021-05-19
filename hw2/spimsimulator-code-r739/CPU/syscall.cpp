@@ -53,7 +53,14 @@
 #include "syscall.h"
 
 #include <iostream>
+#include <vector>
+#include <iomanip>
 using namespace std;
+
+static vector<struct thread *> thread_table;
+static int next_id = 1;
+bool main_thread_initialized = false;
+static thread *current_thread = NULL;
 
 #ifdef _WIN32
 /* Windows has an handler that is invoked when an invalid argument is passed to a system
@@ -67,6 +74,7 @@ using namespace std;
 #include <stdio.h>
 #include <stdlib.h>
 #include <crtdbg.h>
+
 
 void myInvalidParameterHandler(const wchar_t* expression,
    const wchar_t* function, 
@@ -106,20 +114,16 @@ void windowsParameterHandlingControl(int flag )
 
 
 /*You implement your handler here*/
-void SPIM_timerHandler()
-{
-   // Implement your handler..
-   try
-   {
-	throw logic_error( "NotImplementedException\n" );
-   }
-   catch ( exception &e )
-   {
-      cerr <<  endl << "Caught: " << e.what( ) << endl;
-
-   };
-   
+void 
+SPIM_timerHandler() {
+  // Implement your handler..
+  try {
+		switch_thread();
+  } catch (exception &e) {
+    cerr << endl << "Caught: " << e.what() << endl;
+  };
 }
+
 /* Decides which syscall to execute or simulate.  Returns zero upon
    exit syscall and non-zero to continue execution. */
 int
@@ -264,6 +268,24 @@ do_syscall ()
 #endif
 	break;
       }
+		
+    case T_CREATE_SYSCALL: 
+      {
+	    printf("T_CREATE_SYSCALL\n");
+      int start_routine = R[REG_A0];
+      thread *t = new_thread(start_routine);
+      // TODO: implement thread create
+	    break;
+      }
+
+    case T_JOIN_SYSCALL: 
+      {
+	    printf("T_JOIN_SYSCALL\n");
+      // TODO: implement thread join
+      current_thread->state = BLOCKED;
+      switch_thread(); // WARN: should i trigger manually?
+	    break;
+      }
 
     default:
       run_error ("Unknown system call: %d\n", R[REG_V0]);
@@ -350,4 +372,90 @@ handle_exception ()
 	error ("Unknown exception: %d\n", CP0_ExCode);
       break;
     }
+}
+
+thread* get_next_thread() {
+  size_t curr_idx = -1;
+  for (size_t i = 0; i < thread_table.size(); ++i) 
+    if (current_thread == thread_table[i]) {
+      curr_idx = i;
+      break;
+    }
+  if (curr_idx == -1) {
+    cerr << "ERROR: thread not found\n";
+    return NULL;
+  }
+  int next_idx = curr_idx;
+  do {
+    next_idx = (next_idx + 1) % thread_table.size();
+  } while(thread_table[next_idx]->state == BLOCKED);
+  return thread_table[next_idx];
+}
+
+// either on timer interrupt or // FIX: ..
+void switch_thread() {
+  if (!main_thread_initialized)
+    init_table();
+
+  thread *next_thread = get_next_thread();
+  if (next_thread == current_thread)
+    return;
+
+  // backup necessary info
+  /* current_thread->PC = PC - BYTES_PER_WORD; */
+  current_thread->PC = PC;
+
+  // change state
+  if (current_thread->state == RUNNING)
+    current_thread->state = READY;
+
+  current_thread = next_thread;
+  current_thread->state = RUNNING;
+  /* PC = current_thread->PC - BYTES_PER_WORD; */
+  PC = current_thread->PC;
+
+  print_thread_table();
+	// TODO: implement 
+	return;
+}
+
+struct thread* get_thread(int thread_id) {
+  // TODO: implemnt
+  return NULL;
+}
+
+void init_table() {
+  thread *main_thread =  (thread *)malloc(sizeof(thread));
+  main_thread->thread_id = 0;
+  main_thread->state = RUNNING;
+  thread_table.push_back(main_thread);
+  current_thread = main_thread;
+  main_thread_initialized = true;
+}
+
+// start_routine: address of the rotuine to run
+thread* new_thread(int start_routine) {
+  // init main thread table the first time
+  if (!main_thread_initialized)
+    init_table();
+  thread *t = (thread *)malloc(sizeof(thread));
+  t->thread_id = next_id++;
+  t->PC = start_routine;
+
+  /* put new thread to table */
+  thread_table.push_back(t);
+  return t;
+}
+
+void print_thread_table() {
+  /* printf("| thread_id |      PC | Stack Pointer | thread_state |\n"); */
+  cout << endl;
+  cout << "| thread id |      PC | stack pointer | thread state |\n";
+  cout << "|-----------|---------|---------------|--------------|\n";
+  for (size_t i = 0; i < thread_table.size(); ++i) {
+    cout << "|" << setw(11) << thread_table[i]->thread_id
+         << "|" << setw(9)  << thread_table[i]->PC
+         << "|" << setw(15) << 12345
+         << "|" << setw(14) << thread_state_str[thread_table[i]->state] << "|\n";
+  }
 }
