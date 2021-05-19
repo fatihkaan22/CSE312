@@ -60,3 +60,8 @@ void handle_exception ();
 
 #define EXIT2_SYSCALL		17
 
+#define T_CREATE 18
+#define T_JOIN 19
+#define T_EXIT 20
+#define T_MUTEX_LOCK 21
+#define T_MUTEX_UNLOCK 22
