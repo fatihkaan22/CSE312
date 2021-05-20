@@ -62,6 +62,8 @@ void init_table();
 struct thread* new_thread(int);
 struct thread* get_thread(int thread_id);
 void print_thread_table();
+int exit_thread();
+bool all_terminated();
 
 #define PRINT_INT_SYSCALL	1
 #define PRINT_FLOAT_SYSCALL	2

@@ -293,7 +293,13 @@ do_syscall ()
       }
     case T_EXIT_SYSCALL: 
       {
-				exit_thread();
+        if (exit_thread() == 0) {
+          for (size_t i = 0; i < thread_table.size(); ++i) {
+            free(thread_table[i]);
+          }
+          spim_return_value = 0;
+          return 0;
+        }
 	    break;
       }
     case T_MUTEX_LOCK_SYSCALL : 
@@ -406,7 +412,8 @@ thread* get_next_thread() {
   int next_idx = curr_idx;
   do {
     next_idx = (next_idx + 1) % thread_table.size();
-  } while(thread_table[next_idx]->state == BLOCKED);
+  } while(thread_table[next_idx]->state == BLOCKED || 
+          thread_table[next_idx]->state == TERMINATED);
   return thread_table[next_idx];
 }
 
@@ -421,7 +428,7 @@ void switch_thread() {
   if (next_thread == current_thread)
     return;
 
-	cout << endl;
+  cout << endl;
   // backup necessary info
   memcpy(current_thread->R, R, sizeof(R)); // registers
   current_thread->HI = HI;
@@ -484,11 +491,11 @@ thread* new_thread(int start_routine) {
     init_table();
   thread *t = (thread *)malloc(sizeof(thread));
   t->thread_id = next_id++;
-	t->PC = start_routine;
-	t->FPR = (double *)malloc(FPR_LENGTH * sizeof(double));
+  t->PC = start_routine;
+  t->FPR = (double *)malloc(FPR_LENGTH * sizeof(double));
   t->stack_seg = (mem_word *)malloc(STACK_SIZE);
-	t->stack_seg_h = (short *) t->stack_seg;
-	t->stack_seg_b = (BYTE_TYPE *) t->stack_seg;
+  t->stack_seg_h = (short *) t->stack_seg;
+  t->stack_seg_b = (BYTE_TYPE *) t->stack_seg;
 
   /* put new thread to table */
   thread_table.push_back(t);
@@ -508,6 +515,24 @@ void print_thread_table() {
   }
 }
 
-void exit_thread() {
+bool all_terminated() {
+  for (size_t i = 0; i < thread_table.size(); ++i)
+    if (thread_table[i]->state != TERMINATED)
+      return false;
+  return true;
+}
 
+// return 0 if no threads left, 1 otherwise
+int exit_thread() {
+  puts("exit");
+  current_thread->state = TERMINATED;
+  // TODO: free thread
+  free(current_thread->FPR);
+  free(current_thread->stack_seg);
+  if (all_terminated()) {
+    return 0;
+  } else {
+    switch_thread();
+  }
+  return 1;
 }
