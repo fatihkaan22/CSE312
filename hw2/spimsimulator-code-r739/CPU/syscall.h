@@ -36,15 +36,19 @@ void SPIM_timerHandler();
 int do_syscall ();
 void handle_exception ();
 
-enum thread_state { READY, RUNNING, BLOCKED, TERMINATED };
+enum thread_state { READY=0, RUNNING, BLOCKED, TERMINATED };
 static const char* thread_state_str[] = {"READY", "RUNNING", "BLOCKED", "TERMINATED"};
 
 typedef struct thread {
   int thread_id;
   reg_word R[R_LENGTH];
-	reg_word HI_bak, LO_bak;
+	reg_word HI, LO; // NOTE: do i really need this?
   // NOTE: consider adding FPR, FGR, FWR, CCR, CPR
-  mem_addr PC;
+  mem_addr PC, nPC;
+	double *FPR;
+	float *FGR;
+	int *FWR;
+	reg_word CCR[4][32], CPR[4][32];
   // NOTE: consider removing unnecassary stack variables
   mem_word *stack_seg;
   short *stack_seg_h;

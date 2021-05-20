@@ -118,7 +118,7 @@ void
 SPIM_timerHandler() {
   // Implement your handler..
   try {
-		switch_thread();
+  switch_thread();
   } catch (exception &e) {
     cerr << endl << "Caught: " << e.what() << endl;
   };
@@ -273,8 +273,13 @@ do_syscall ()
       {
 	    printf("T_CREATE_SYSCALL\n");
       int start_routine = R[REG_A0];
+      /* cout << "this: " << start_routine <<  endl; */
+      /* cout << "main: " << find_symbol_address("main") << endl; */
+      /* cout << "thread1: " << find_symbol_address("thread1") << endl; */
+      /* cout << "thread2: " << find_symbol_address("thread2") << endl; */
+      /* cout << "thread3: " << find_symbol_address("thread3") << endl; */
+
       thread *t = new_thread(start_routine);
-      // TODO: implement thread create
 	    break;
       }
 
@@ -284,6 +289,19 @@ do_syscall ()
       // TODO: implement thread join
       current_thread->state = BLOCKED;
       switch_thread(); // WARN: should i trigger manually?
+	    break;
+      }
+    case T_EXIT_SYSCALL: 
+      {
+				exit_thread();
+	    break;
+      }
+    case T_MUTEX_LOCK_SYSCALL : 
+      {
+	    break;
+      }
+    case T_MUTEX_UNLOCK_SYSCALL : 
+      {
 	    break;
       }
 
@@ -397,13 +415,28 @@ void switch_thread() {
   if (!main_thread_initialized)
     init_table();
 
+  print_thread_table();
+
   thread *next_thread = get_next_thread();
   if (next_thread == current_thread)
     return;
 
+	cout << endl;
   // backup necessary info
-  /* current_thread->PC = PC - BYTES_PER_WORD; */
+  memcpy(current_thread->R, R, sizeof(R)); // registers
+  current_thread->HI = HI;
+  current_thread->LO = LO;
   current_thread->PC = PC;
+  current_thread->nPC = nPC;
+  current_thread->FPR = FPR;
+  current_thread->FGR = FGR;
+  current_thread->FWR = FWR;
+  memcpy(current_thread->CCR, CCR, sizeof(CCR));
+  memcpy(current_thread->CPR, CPR, sizeof(CPR));
+  current_thread->stack_seg = stack_seg;
+  current_thread->stack_seg_h = stack_seg_h;
+  current_thread->stack_seg_b = stack_seg_b;
+  current_thread->stack_bot = stack_bot;
 
   // change state
   if (current_thread->state == RUNNING)
@@ -411,12 +444,23 @@ void switch_thread() {
 
   current_thread = next_thread;
   current_thread->state = RUNNING;
-  /* PC = current_thread->PC - BYTES_PER_WORD; */
+  // restore
+  memcpy(R, current_thread->R, sizeof(R)); // registers
   PC = current_thread->PC;
-
-  print_thread_table();
-	// TODO: implement 
-	return;
+  HI = current_thread->HI;
+  LO = current_thread->LO;
+  PC = current_thread->PC;
+  nPC =current_thread->nPC;
+  FPR =current_thread->FPR;
+  FGR =current_thread->FGR;
+  FWR =current_thread->FWR;
+  memcpy(CCR, current_thread->CCR, sizeof(CCR));
+  memcpy(CPR, current_thread->CPR, sizeof(CPR));
+  stack_seg = current_thread->stack_seg;
+  stack_seg_h = current_thread->stack_seg_h;
+  stack_seg_b = current_thread->stack_seg_b;
+  stack_bot = current_thread->stack_bot;
+  return;
 }
 
 struct thread* get_thread(int thread_id) {
@@ -440,7 +484,11 @@ thread* new_thread(int start_routine) {
     init_table();
   thread *t = (thread *)malloc(sizeof(thread));
   t->thread_id = next_id++;
-  t->PC = start_routine;
+	t->PC = start_routine;
+	t->FPR = (double *)malloc(FPR_LENGTH * sizeof(double));
+  t->stack_seg = (mem_word *)malloc(STACK_SIZE);
+	t->stack_seg_h = (short *) t->stack_seg;
+	t->stack_seg_b = (BYTE_TYPE *) t->stack_seg;
 
   /* put new thread to table */
   thread_table.push_back(t);
@@ -458,4 +506,8 @@ void print_thread_table() {
          << "|" << setw(15) << 12345
          << "|" << setw(14) << thread_state_str[thread_table[i]->state] << "|\n";
   }
+}
+
+void exit_thread() {
+
 }
