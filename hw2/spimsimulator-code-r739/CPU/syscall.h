@@ -57,13 +57,26 @@ typedef struct thread {
 	thread_state state;
 }thread;
 
+enum mutex_state { LOCKED, UNLOCKED };
+
+typedef struct mutex {
+  reg_word addr;
+	mutex_state state;
+	int owner_id;
+	thread* waiting_threads[64];
+}mutex;
+
 void switch_thread();
 void init_table();
-struct thread* new_thread(int);
+struct thread* new_thread(reg_word start_routine);
 struct thread* get_thread(int thread_id);
 void print_thread_table();
 int exit_thread();
 bool all_terminated();
+mutex* get_mutex(reg_word mutex_addr);
+void mutex_init(reg_word mutex_addr);
+void mutex_lock(reg_word mutex_addr);
+void mutex_unlock(reg_word mutex_addr);
 
 #define PRINT_INT_SYSCALL	1
 #define PRINT_FLOAT_SYSCALL	2
@@ -92,5 +105,6 @@ bool all_terminated();
 #define T_CREATE_SYSCALL 18
 #define T_JOIN_SYSCALL 19
 #define T_EXIT_SYSCALL 20
-#define T_MUTEX_LOCK_SYSCALL 21
-#define T_MUTEX_UNLOCK_SYSCALL 22
+#define T_MUTEX_INIT 21
+#define T_MUTEX_LOCK_SYSCALL 22
+#define T_MUTEX_UNLOCK_SYSCALL 23

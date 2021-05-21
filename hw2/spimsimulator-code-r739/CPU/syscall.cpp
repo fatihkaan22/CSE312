@@ -62,6 +62,8 @@ static int next_id = 1;
 bool main_thread_initialized = false;
 static thread *current_thread = NULL;
 
+static vector<struct mutex> mutex_table;
+
 #ifdef _WIN32
 /* Windows has an handler that is invoked when an invalid argument is passed to a system
    call. https://msdn.microsoft.com/en-us/library/a9yf33zb(v=vs.110).aspx
@@ -118,6 +120,7 @@ void
 SPIM_timerHandler() {
   // Implement your handler..
   try {
+  // TODO: if interrupts are disabled don't switch thread
   switch_thread();
   } catch (exception &e) {
     cerr << endl << "Caught: " << e.what() << endl;
@@ -272,7 +275,7 @@ do_syscall ()
     case T_CREATE_SYSCALL: 
       {
 	    printf("T_CREATE_SYSCALL\n");
-      int start_routine = R[REG_A0];
+      reg_word start_routine = R[REG_A0];
       /* cout << "this: " << start_routine <<  endl; */
       /* cout << "main: " << find_symbol_address("main") << endl; */
       /* cout << "thread1: " << find_symbol_address("thread1") << endl; */
@@ -280,15 +283,16 @@ do_syscall ()
       /* cout << "thread3: " << find_symbol_address("thread3") << endl; */
 
       thread *t = new_thread(start_routine);
+			// FIX: return thread id (possibly on v0)
 	    break;
       }
 
     case T_JOIN_SYSCALL: 
       {
 	    printf("T_JOIN_SYSCALL\n");
-      // TODO: implement thread join
+			// FIX: should also keep track of which thread is waiting on
       current_thread->state = BLOCKED;
-      switch_thread(); // WARN: should i trigger manually?
+      switch_thread(); // WARN: should i trigger manually? yeah, why not
 	    break;
       }
     case T_EXIT_SYSCALL: 
@@ -302,12 +306,21 @@ do_syscall ()
         }
 	    break;
       }
+    case T_MUTEX_INIT : 
+      {
+        mutex_init(R[REG_A0]);
+	    break;
+      }
     case T_MUTEX_LOCK_SYSCALL : 
       {
+        reg_word mutex_addr = R[REG_A0]; // WARN: word - addr
+        mutex_lock(mutex_addr);
 	    break;
       }
     case T_MUTEX_UNLOCK_SYSCALL : 
       {
+        reg_word mutex_addr = R[REG_A0]; // WARN: word - addr
+        mutex_unlock(mutex_addr);
 	    break;
       }
 
@@ -417,7 +430,6 @@ thread* get_next_thread() {
   return thread_table[next_idx];
 }
 
-// either on timer interrupt or // FIX: ..
 void switch_thread() {
   if (!main_thread_initialized)
     init_table();
@@ -485,13 +497,14 @@ void init_table() {
 }
 
 // start_routine: address of the rotuine to run
-thread* new_thread(int start_routine) {
+thread* new_thread(reg_word start_routine) {
   // init main thread table the first time
   if (!main_thread_initialized)
     init_table();
   thread *t = (thread *)malloc(sizeof(thread));
+
   t->thread_id = next_id++;
-  t->PC = start_routine;
+  t->PC = start_routine; // WARN: assigning reg_word to mem_addr might be an issue here
   t->FPR = (double *)malloc(FPR_LENGTH * sizeof(double));
   t->stack_seg = (mem_word *)malloc(STACK_SIZE);
   t->stack_seg_h = (short *) t->stack_seg;
@@ -524,9 +537,9 @@ bool all_terminated() {
 
 // return 0 if no threads left, 1 otherwise
 int exit_thread() {
-  puts("exit");
+  puts("\nT_EXIT_SYSCALL");
   current_thread->state = TERMINATED;
-  // TODO: free thread
+  // free thread
   free(current_thread->FPR);
   free(current_thread->stack_seg);
   if (all_terminated()) {
@@ -535,4 +548,63 @@ int exit_thread() {
     switch_thread();
   }
   return 1;
+}
+
+mutex* get_mutex(reg_word mutex_addr) {
+  for (size_t i = 0; i < mutex_table.size(); ++i)
+    if (mutex_table[i].addr == mutex_addr)
+      return &mutex_table[i];
+  return NULL;
+}
+
+void mutex_init(reg_word mutex_addr) {
+  mutex m;
+  m.addr = mutex_addr;
+  m.state = UNLOCKED;
+  m.owner_id = -1; // only can be owned if mutex is locked
+  m.waiting_threads[0] = NULL;
+  mutex_table.push_back(m);
+}
+
+void mutex_lock(reg_word mutex_addr) {
+  cout << "MUTEX_LOCK" << endl;
+  cout <<"mutex_addr: " << mutex_addr << endl;
+  mutex* m = get_mutex(mutex_addr);
+
+  if (m->state == UNLOCKED) {
+    m->owner_id = current_thread->thread_id;
+    m->state = LOCKED;
+  } else {
+    cout << "WAIT ON MUTEX" << endl;
+    current_thread->state = BLOCKED;
+    int i = 0;
+    while(m->waiting_threads[i]) ++i; // iterate first free position
+    m->waiting_threads[i] = current_thread;
+    m->waiting_threads[i+1] = NULL;
+    switch_thread();
+  }
+
+}
+
+void mutex_unlock(reg_word mutex_addr) {
+  cout << "MUTEX_UNLOCK" << endl;
+  cout <<"mutex_addr: " << mutex_addr << endl;
+  mutex* m = get_mutex(mutex_addr);
+
+  if (m->state == UNLOCKED) {
+    cout << "ERROR: MUTEX ALREADY UNLOCKED" << endl; // FIX: 
+    exit(1);
+  }
+
+  if (m->waiting_threads[0] == NULL) { // no thread waiting on
+    m->state = UNLOCKED;
+    m->owner_id = -1;
+    return;
+  }
+  // iterate last thread
+  int i = 0;
+  while(m->waiting_threads[i+1]) ++i;
+  m->waiting_threads[i]->state = READY;
+  m->owner_id = m->waiting_threads[i]->thread_id;
+  m->waiting_threads[i] = NULL;
 }
