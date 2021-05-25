@@ -63,6 +63,10 @@ bool main_thread_initialized = false;
 static thread *current_thread = NULL;
 
 static vector<struct mutex> mutex_table;
+static bool got_intr_on_syscall = false;
+static uint32 intr_pc = 0;
+static int intr_thread_id = -1;
+
 
 #ifdef _WIN32
 /* Windows has an handler that is invoked when an invalid argument is passed to a system
@@ -121,7 +125,7 @@ SPIM_timerHandler() {
   // Implement your handler..
   try {
   // TODO: if interrupts are disabled don't switch thread
-  switch_thread();
+  switch_thread(false);
   } catch (exception &e) {
     cerr << endl << "Caught: " << e.what() << endl;
   };
@@ -132,6 +136,16 @@ SPIM_timerHandler() {
 int
 do_syscall ()
 {
+	/* if (got_intr_on_syscall && PC == intr_pc && intr_thread_id == current_thread->thread_id) { */
+	/* 	cout << "\nGOT_INTR_ON_SYSCALL\n"; */
+	/* 	got_intr_on_syscall = false; */
+	/* 	intr_pc = 0; */
+	/* 	intr_thread_id = -1; */
+	/* 	return 1; */
+	/* } */
+	/* got_intr_on_syscall = false; */
+	/* intr_pc = 0; */
+	/* intr_thread_id = -1; */
 #ifdef _WIN32
     windowsParameterHandlingControl(0);
 #endif
@@ -139,7 +153,6 @@ do_syscall ()
   /* Syscalls for the source-language version of SPIM.  These are easier to
      use than the real syscall and are portable to non-MIPS operating
      systems. */
-
   switch (R[REG_V0])
     {
     case PRINT_INT_SYSCALL:
@@ -283,17 +296,24 @@ do_syscall ()
       /* cout << "thread3: " << find_symbol_address("thread3") << endl; */
 
       thread *t = new_thread(start_routine);
-			// FIX: return thread id (possibly on v0)
+      // FIX: return thread id (possibly on v0)
+      R[REG_V0] = t->thread_id;
 	    break;
       }
 
     case T_JOIN_SYSCALL: 
       {
-	    printf("T_JOIN_SYSCALL\n");
-			// FIX: should also keep track of which thread is waiting on
-      current_thread->state = BLOCKED;
-      switch_thread(); // WARN: should i trigger manually? yeah, why not
-	    break;
+	      printf("T_JOIN_SYSCALL\n");
+	      /* // FIX: should also keep track of which thread is waiting on */
+        reg_word wait_for = R[REG_A0]; // WARN: word - addr
+        cout << "wait_for: " << wait_for << endl;
+        thread* wait = get_thread(wait_for);
+        if (wait->state != TERMINATED) {
+          wait->join = current_thread;
+          current_thread->state = BLOCKED;
+          /* manual_switch_thread(); */
+	      }
+        break;
       }
     case T_EXIT_SYSCALL: 
       {
@@ -314,12 +334,14 @@ do_syscall ()
     case T_MUTEX_LOCK_SYSCALL : 
       {
         reg_word mutex_addr = R[REG_A0]; // WARN: word - addr
+        cout << "MUTEX_ADDR: " << mutex_addr << endl;
         mutex_lock(mutex_addr);
 	    break;
       }
     case T_MUTEX_UNLOCK_SYSCALL : 
       {
         reg_word mutex_addr = R[REG_A0]; // WARN: word - addr
+        cout << "MUTEX_UNLOCK: " << mutex_addr << endl;
         mutex_unlock(mutex_addr);
 	    break;
       }
@@ -412,7 +434,7 @@ handle_exception ()
 }
 
 thread* get_next_thread() {
-  size_t curr_idx = -1;
+  int curr_idx = -1;
   for (size_t i = 0; i < thread_table.size(); ++i) 
     if (current_thread == thread_table[i]) {
       curr_idx = i;
@@ -430,15 +452,31 @@ thread* get_next_thread() {
   return thread_table[next_idx];
 }
 
-void switch_thread() {
+void switch_thread(bool manual) {
+  // FIX: DEBUG
+	instruction* ins = read_mem_inst (PC);
+	if (ins->source_line) {
+		cout << "\nline: " << ins->source_line << endl;
+	} else
+		cout << "\nline: " << "null" << endl;
+
+	if (OPCODE(ins) == 533) {
+		cout << "\n--------------------------------------------------SYSCALL\n";
+	}
+
+  // FIX: DEBUG
   if (!main_thread_initialized)
     init_table();
 
   print_thread_table();
 
   thread *next_thread = get_next_thread();
-  if (next_thread == current_thread)
+  if (next_thread == current_thread) {
+		cout << "NEXT == current_thread\n";
     return;
+	}
+
+  cout << endl << current_thread->thread_id << "->" << next_thread->thread_id << endl;
 
   cout << endl;
   // backup necessary info
@@ -456,6 +494,26 @@ void switch_thread() {
   current_thread->stack_seg_h = stack_seg_h;
   current_thread->stack_seg_b = stack_seg_b;
   current_thread->stack_bot = stack_bot;
+
+
+	instruction* inst2 = read_mem_inst (PC - 4);
+  if (inst2 == NULL) {
+    puts("PC+4 NULL");
+    /* current_thread->PC -= BYTES_PER_WORD; */
+		/* got_intr_on_syscall = true; */
+		/* intr_pc = PC; */
+		/* intr_thread_id = next_thread->thread_id; */
+  }
+	else if (OPCODE(inst2) == 533) {
+		puts("asdf");
+    /* current_thread->PC -= BYTES_PER_WORD; */
+		/* got_intr_on_syscall = true; */
+		/* intr_pc = PC; */
+		/* intr_thread_id = next_thread->thread_id; */
+	}
+
+  /* if (opcode_is_jump (ins->opcode)) // HACK: is it though? */ 
+  /*   current_thread->PC -= BYTES_PER_WORD; */
 
   // change state
   if (current_thread->state == RUNNING)
@@ -479,11 +537,20 @@ void switch_thread() {
   stack_seg_h = current_thread->stack_seg_h;
   stack_seg_b = current_thread->stack_seg_b;
   stack_bot = current_thread->stack_bot;
+  
+	if (manual) {
+		PC -= BYTES_PER_WORD;
+	}
+
+  print_thread_table();
+
   return;
 }
 
 struct thread* get_thread(int thread_id) {
-  // TODO: implemnt
+  for (size_t i = 0; i < thread_table.size(); ++i)
+    if (thread_table[i]->thread_id == thread_id)
+      return thread_table[i];
   return NULL;
 }
 
@@ -509,6 +576,7 @@ thread* new_thread(reg_word start_routine) {
   t->stack_seg = (mem_word *)malloc(STACK_SIZE);
   t->stack_seg_h = (short *) t->stack_seg;
   t->stack_seg_b = (BYTE_TYPE *) t->stack_seg;
+	t->join = NULL;
 
   /* put new thread to table */
   thread_table.push_back(t);
@@ -539,13 +607,29 @@ bool all_terminated() {
 int exit_thread() {
   puts("\nT_EXIT_SYSCALL");
   current_thread->state = TERMINATED;
+
+	for (size_t i = 0; i < mutex_table.size(); ++i) {
+		if (mutex_table[i].owner_id == current_thread->thread_id) {
+			cout << "YEEEY" << endl;
+			mutex_unlock(mutex_table[i].addr);
+		}
+	}
+
   // free thread
   free(current_thread->FPR);
   free(current_thread->stack_seg);
+
+  if (current_thread->join != NULL) {
+    cout << "here: " << current_thread->join->thread_id << endl;
+    current_thread->join->state = READY;
+  }
+
   if (all_terminated()) {
+		puts("\nALL_TERM\n");
     return 0;
   } else {
-    switch_thread();
+    manual_switch_thread();
+		/* switch_thread(false); */
   }
   return 1;
 }
@@ -571,6 +655,9 @@ void mutex_lock(reg_word mutex_addr) {
   cout <<"mutex_addr: " << mutex_addr << endl;
   mutex* m = get_mutex(mutex_addr);
 
+	if (m->owner_id == current_thread->thread_id)
+		return;
+
   if (m->state == UNLOCKED) {
     m->owner_id = current_thread->thread_id;
     m->state = LOCKED;
@@ -579,11 +666,11 @@ void mutex_lock(reg_word mutex_addr) {
     current_thread->state = BLOCKED;
     int i = 0;
     while(m->waiting_threads[i]) ++i; // iterate first free position
+    cout << "this is i " << i << endl;
     m->waiting_threads[i] = current_thread;
     m->waiting_threads[i+1] = NULL;
-    switch_thread();
+    manual_switch_thread();
   }
-
 }
 
 void mutex_unlock(reg_word mutex_addr) {
@@ -599,12 +686,23 @@ void mutex_unlock(reg_word mutex_addr) {
   if (m->waiting_threads[0] == NULL) { // no thread waiting on
     m->state = UNLOCKED;
     m->owner_id = -1;
+		puts("MTXULC: NO WAITING");
     return;
   }
   // iterate last thread
   int i = 0;
+  /* m->state = UNLOCKED; */
   while(m->waiting_threads[i+1]) ++i;
   m->waiting_threads[i]->state = READY;
   m->owner_id = m->waiting_threads[i]->thread_id;
+	cout << "MTXULCK:" << m->owner_id << "  " << i;
   m->waiting_threads[i] = NULL;
+}
+
+void manual_switch_thread() {
+	puts("MANUAL_SWITCH_THREAD");
+  /* PC += BYTES_PER_WORD; */
+  /* PC -= BYTES_PER_WORD; */
+  switch_thread(true);
+  /* PC -= BYTES_PER_WORD; */
 }
