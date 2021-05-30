@@ -55,6 +55,7 @@ typedef struct thread {
   BYTE_TYPE *stack_seg_b;
   mem_addr stack_bot;
 	thread_state state;
+	thread* join;
 }thread;
 
 enum mutex_state { LOCKED, UNLOCKED };
@@ -63,10 +64,16 @@ typedef struct mutex {
   reg_word addr;
 	mutex_state state;
 	int owner_id;
-	thread* waiting_threads[64];
+	thread* waiting_threads[128];
 }mutex;
 
-void switch_thread();
+typedef struct cond {
+  reg_word addr;
+  thread* wait_on;
+}cond;
+
+
+void switch_thread(bool);
 void init_table();
 struct thread* new_thread(reg_word start_routine);
 struct thread* get_thread(int thread_id);
@@ -77,6 +84,7 @@ mutex* get_mutex(reg_word mutex_addr);
 void mutex_init(reg_word mutex_addr);
 void mutex_lock(reg_word mutex_addr);
 void mutex_unlock(reg_word mutex_addr);
+void manual_switch_thread();
 
 #define PRINT_INT_SYSCALL	1
 #define PRINT_FLOAT_SYSCALL	2
