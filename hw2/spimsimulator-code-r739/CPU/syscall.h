@@ -42,29 +42,29 @@ static const char* thread_state_str[] = {"READY", "RUNNING", "BLOCKED", "TERMINA
 typedef struct thread {
   int thread_id;
   reg_word R[R_LENGTH];
-	reg_word HI, LO; // NOTE: do i really need this?
+  reg_word HI, LO; // NOTE: do i really need this?
   // NOTE: consider adding FPR, FGR, FWR, CCR, CPR
   mem_addr PC, nPC;
-	double *FPR;
-	float *FGR;
-	int *FWR;
-	reg_word CCR[4][32], CPR[4][32];
+  double *FPR;
+  float *FGR;
+  int *FWR;
+  reg_word CCR[4][32], CPR[4][32];
   // NOTE: consider removing unnecassary stack variables
   mem_word *stack_seg;
   short *stack_seg_h;
   BYTE_TYPE *stack_seg_b;
   mem_addr stack_bot;
-	thread_state state;
-	thread* join;
+  thread_state state;
+  thread* join;
 }thread;
 
 enum mutex_state { LOCKED, UNLOCKED };
 
 typedef struct mutex {
   reg_word addr;
-	mutex_state state;
-	int owner_id;
-	thread* waiting_threads[128];
+  mutex_state state;
+  int owner_id;
+  thread* waiting_threads[128];
 }mutex;
 
 typedef struct cond {
