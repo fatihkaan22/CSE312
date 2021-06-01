@@ -64,8 +64,6 @@ bool main_thread_initialized = false;
 static thread *current_thread = NULL;
 
 static vector<struct mutex> mutex_table;
-static vector<struct cond> condition_variables;
-
 
 #ifdef _WIN32
 /* Windows has an handler that is invoked when an invalid argument is passed to a system
@@ -123,7 +121,6 @@ void
 SPIM_timerHandler() {
   // Implement your handler..
   try {
-  // TODO: if interrupts are disabled don't switch thread
   switch_thread(false);
   } catch (exception &e) {
     cerr << endl << "Caught: " << e.what() << endl;
@@ -280,14 +277,7 @@ do_syscall ()
         cout << "T_CREATE_SYSCALL\n"; 
 #endif
       reg_word start_routine = R[16]; // s0 register
-      /* cout << "this: " << start_routine <<  endl; */
-      /* cout << "main: " << find_symbol_address("main") << endl; */
-      /* cout << "thread1: " << find_symbol_address("thread1") << endl; */
-      /* cout << "thread2: " << find_symbol_address("thread2") << endl; */
-      /* cout << "thread3: " << find_symbol_address("thread3") << endl; */
-
       thread *t = new_thread(start_routine);
-      // FIX: return thread id (possibly on v0)
       R[REG_V0] = t->thread_id;
 	    break;
       }
@@ -297,7 +287,7 @@ do_syscall ()
 #ifdef DEBUG
         cout << "T_JOIN_SYSCALL\n";
 #endif
-        reg_word wait_for = R[REG_A0]; // WARN: word - addr
+        reg_word wait_for = R[REG_A0];
 #ifdef DEBUG
         cout << "wait_for: " << wait_for << endl;
 #endif
@@ -306,8 +296,6 @@ do_syscall ()
           wait->join = current_thread;
           current_thread->state = BLOCKED;
           manual_switch_thread();
-          /* PC += BYTES_PER_WORD; // TODO: WHY */
-          /* switch_thread(false); */
 	      }
         break;
       }
@@ -329,7 +317,7 @@ do_syscall ()
       }
     case T_MUTEX_LOCK_SYSCALL : 
       {
-        reg_word mutex_addr = R[REG_A0]; // WARN: word - addr
+        reg_word mutex_addr = R[REG_A0];
         /* cout << "MUTEX_ADDR: " << mutex_addr << endl; */
         mutex_lock(mutex_addr);
 	    break;
@@ -339,7 +327,7 @@ do_syscall ()
 #ifdef DEBUG
       cout << "MUTEX UNLOCK\n";
 #endif
-      reg_word mutex_addr = R[REG_A0]; // WARN: word - addr
+      reg_word mutex_addr = R[REG_A0];
       /* cout << "MUTEX_UNLOCK: " << mutex_addr << endl; */
       mutex_unlock(mutex_addr);
       break;
@@ -451,18 +439,6 @@ thread* get_next_thread() {
 }
 
 void switch_thread(bool manual) {
-  // FIX: DEBUG
-  instruction* ins = read_mem_inst (PC);
-  /* if (ins->source_line) { */
-  /*   cout << "\nline: " << ins->source_line << endl; */
-  /* } else */
-  /*   cout << "\nline: " << "null" << endl; */
-
-  /* if (OPCODE(ins) == 533) { */
-  /*   cout << "\n--------------------------------------------------SYSCALL\n"; */
-  /* } */
-
-  // FIX: DEBUG
   if (!main_thread_initialized)
     init_table();
 
@@ -476,9 +452,9 @@ void switch_thread(bool manual) {
 #endif
 
   // switch thread: from -> to
-#ifdef DEBUG
-  cout << endl << current_thread->thread_id << "->" << next_thread->thread_id << endl;
-#endif
+  cout << endl
+       << "switching: " << current_thread->thread_id << "->"
+       << next_thread->thread_id << endl;
 
   cout << endl;
   // backup necessary info
@@ -496,29 +472,6 @@ void switch_thread(bool manual) {
   current_thread->stack_seg_h = stack_seg_h;
   current_thread->stack_seg_b = stack_seg_b;
   current_thread->stack_bot = stack_bot;
-
-
-  instruction* inst2 = read_mem_inst (PC - 4);
-  if (inst2 == NULL) {
-    puts("PC+4 NULL");
-    /* current_thread->PC -= BYTES_PER_WORD; */
-    /* got_intr_on_syscall = true; */
-    /* intr_pc = PC; */
-    /* intr_thread_id = next_thread->thread_id; */
-  }
-  else if (OPCODE(inst2) == 533) {
-    #ifdef DEBUG
-    puts("intr on syscall");
-    #endif
-    /* PC -= 4; */
-    /* current_thread->PC -= BYTES_PER_WORD; */
-    /* got_intr_on_syscall = true; */
-    /* intr_pc = PC; */
-  /* intr_thread_id = next_thread->thread_id; */
-  }
-
-  /* if (opcode_is_jump (ins->opcode)) // HACK: is it though? */ 
-  /*   current_thread->PC -= BYTES_PER_WORD; */
 
   // change state
   if (current_thread->state == RUNNING)
@@ -576,37 +529,26 @@ thread* new_thread(reg_word start_routine) {
   thread *t = (thread *)malloc(sizeof(thread));
 
   t->thread_id = next_id++;
-  t->PC = start_routine; // WARN: assigning reg_word to mem_addr might be an issue here
+  t->PC = start_routine;
   t->FPR = (double *)malloc(FPR_LENGTH * sizeof(double));
   t->stack_seg = (mem_word *)malloc(STACK_SIZE);
   t->stack_seg_h = (short *) t->stack_seg;
   t->stack_seg_b = (BYTE_TYPE *) t->stack_seg;
+	t->stack_bot = stack_bot;
+
   t->join = NULL;
-  t->R[REG_SP] = STACK_TOP - BYTES_PER_WORD - 4096; /* Initialize $sp */
-  /* t->R[REG_SP] = STACK_TOP - 1; /1* Initialize $sp *1/ */
   t->HI = 0;
   t->LO = 0;
-  /* initialize_registers(); */
+
+  /* t->R[REG_SP] = STACK_TOP - 1; /1* Initialize $sp *1/ */
+  t->R[REG_SP] = STACK_TOP - BYTES_PER_WORD - 4096; /* Initialize $sp */
+
   // get a0, a1, a2 (to pass args to thread)
-  /* t->R[REG_A0] = R[REG_A0]; */
-  /* t->R[REG_A1] = R[REG_A1]; */
-  /* t->R[REG_A2] = R[REG_A2]; */
+  t->R[REG_A0] = R[REG_A0];
+  t->R[REG_A1] = R[REG_A1];
+  t->R[REG_A2] = R[REG_A2];
 
-  /* mem_word *tmp = stack_seg; */
-  /* stack_seg = t->stack_seg; */
-  /* initialize_run_stack(0, NULL); */
-  /* stack_seg = tmp; */
-
-
-  // FIX: 
-  /* memcpy(t->stack_seg, stack_seg, STACK_SIZE); */
-
-  /* // get a0, a1, a2 (to pass args to thread) */
-  /* t->R[REG_A0] = R[REG_A0]; */
-  /* t->R[REG_A1] = R[REG_A1]; */
-  /* t->R[REG_A2] = R[REG_A2]; */
-
-  /* put new thread to table */
+  // put new thread to table
   thread_table.push_back(t);
   return t;
 }
@@ -632,7 +574,6 @@ bool all_terminated() {
 
 // return 0 if no threads left, 1 otherwise
 int exit_thread() {
-
 #ifdef DEBUG
   cout << "\nT_EXIT_SYSCALL" << endl;
 #endif
@@ -659,7 +600,6 @@ int exit_thread() {
     return 0;
   } else {
     manual_switch_thread();
-    /* switch_thread(false); */
   }
   return 1;
 }
@@ -681,7 +621,6 @@ void mutex_init(reg_word mutex_addr) {
 }
 
 void mutex_lock(reg_word mutex_addr) {
-  /* cout << "MUTEX_LOCK" << endl; */
   /* cout <<"mutex_addr: " << mutex_addr << endl; */
   mutex* m = get_mutex(mutex_addr);
 
@@ -696,7 +635,6 @@ void mutex_lock(reg_word mutex_addr) {
     current_thread->state = BLOCKED;
     int i = 0;
     while(m->waiting_threads[i]) ++i; // iterate first free position
-    /* cout << "this is i " << i << endl; */
     m->waiting_threads[i] = current_thread;
     m->waiting_threads[i+1] = NULL;
     PC -= 4; // to retry to take the mutex
@@ -711,7 +649,7 @@ void mutex_unlock(reg_word mutex_addr) {
 
   if (m->state == UNLOCKED) {
 #ifdef DEBUG
-    cout << "MUTEX ALREADY UNLOCKED" << endl; // FIX:
+    cout << "MUTEX ALREADY UNLOCKED" << endl;
 #endif
     return;
   }
@@ -719,15 +657,11 @@ void mutex_unlock(reg_word mutex_addr) {
   if (m->waiting_threads[0] == NULL) { // no thread waiting on
     m->state = UNLOCKED;
     m->owner_id = -1;
-    /* puts("MTXULC: NO WAITING"); */
     return;
   }
   // iterate last thread
   int i = 0;
   m->state = UNLOCKED;
-  /* while(m->waiting_threads[i+1]) ++i; */
-  /* m->waiting_threads[i]->state = READY; */
-  /* m->owner_id = m->waiting_threads[i]->thread_id; */  
   while(m->waiting_threads[i]) {
     m->waiting_threads[i]->state = READY;
     ++i;
