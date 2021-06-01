@@ -18,7 +18,7 @@ main:
 
     li $v0, 21     # mutex init
     la $a0, mutex
-		syscall
+    syscall
 
     li $t1, 0
 
@@ -69,52 +69,39 @@ main:
     syscall
 
 producer:
-    nop
-
     li $s1, 0
 produce_loop:
     jal wait_empty
     jal mutex_lock
-
-    li $v0, 4
-    la $a0, producer_str
-    syscall
-
-    jal produce
+    jal produce    # critical section
     jal print_newline
-
     jal mutex_unlock
 
     addi $s1, $s1, 1
-    blt $s1, 10000, produce_loop
+    blt $s1, 1000, produce_loop
+
     li $v0, 20      # thread exit
     syscall
 
 consumer:
-    nop
-
     li $s1, 0
 consume_loop:
     jal wait_full
     jal mutex_lock
-
-    li $v0, 4
-    la $a0, consumer_str
-    syscall
-
     jal consume
     jal print_newline
-
     jal mutex_unlock
 
     addi $s1, $s1, 1
-    blt $s1, 10000, consume_loop
-
+    blt $s1, 1000, consume_loop
 
     li $v0, 20      # thread exit
     syscall
 
 produce:
+    li $v0, 4
+    la $a0, producer_str
+    syscall
     la $t0, count
     lw $t1, ($t0)
     addi $t1, $t1, 1
@@ -130,6 +117,9 @@ produce:
     jr $ra
 
 consume:
+    li $v0, 4
+    la $a0, consumer_str
+    syscall
     la $t0, count
     lw $t1, ($t0)
     addi $t1, $t1, -1
