@@ -37,23 +37,61 @@ int main(int argc, char *argv[]) {
     usage();
   filesystem_path = argv[2];
 
-  printf("%d\n", block_size);
-  printf("%s\n", filesystem_path);
 
-  FILE *fp = fopen(filesystem_path, "wb");
+  fp = fopen(filesystem_path, "wb");
   if (fp == NULL) {
     fprintf(stderr, "Cannot open file");
     exit(EXIT_FAILURE);
   }
 
-  struct super_block sb;
-  sb.block_size = block_size;
-  sb.block_count = NO_BLOCKS; // constant: 2^12
+  super_blk.block_size = block_size;
+  super_blk.block_count = NO_BLOCKS;        // constant: 2^12
+  super_blk.free_bitmap_start = block_size; // right afer superblock
+  super_blk.free_block_size = NO_BLOCKS;
+  super_blk.fat_table_start =
+      super_blk.free_bitmap_start + super_blk.free_block_size;
+  super_blk.fat_table_block_size =
+      (FAT_TABLE_BYTE_SIZE + (super_blk.block_size) - 1) / super_blk.block_size;
+  super_blk.root_start = (super_blk.fat_table_start + 16 * block_size);
+  super_blk.root_size = NO_ROOT_BLOCKS * block_size;
+  super_blk.data_start = super_blk.root_start + super_blk.root_size;
+  super_blk.no_free_blocks = (NO_BLOCKS - NO_ROOT_BLOCKS // root directory
+                              - 16                       // fat + reserved
+                              - 1                        // free bitmap
+                              - 1                        // superblock
+  );
+  super_blk.data_size = super_blk.no_free_blocks * block_size;
 
-  int disksize = sb.block_count * sb.block_size;
+  // free bitmap
+  /* uint32_t free_bitmap[BITMAP_WORD_SIZE]; */
+  memset(free_bitmap, 0, sizeof(free_bitmap)); // init with zeros
+  // mark as filled: first 2 blocks
+  set_bit(free_bitmap, 0);
+  set_bit(free_bitmap, 1);
 
-  for (int i = 0; i < disksize; ++i) {
-    putc(0, fp);
+  // fat table
+  memset(fat_table, 0, sizeof(fat_table)); // init with zeros
+  // The entries in positions 0 and 1 of the FAT are reserved
+  fat_table[0].x = -1;
+  fat_table[1].x = -1;
+  // FAT table root dir
+  int s = 2;
+  for (int i = 0; i < NO_ROOT_BLOCKS - 1; ++i) {
+    fat_table[s].x = s + 1;
+    set_bit(free_bitmap, s);
+    s++;
+  }
+  fat_table[s].x = -1;
+  set_bit(free_bitmap, s);
+
+  write_superblock();
+  write_bitmap();
+  write_fattable();
+
+  int reserved = 1 + 1 + sizeof(fat_table) / block_size;
+  // fill rest of the blocks (total - reserved) with 0
+  for (int i = 0; i < super_blk.block_count - reserved; ++i) {
+    write_zeros(super_blk.block_size);
   }
 
   fclose(fp);

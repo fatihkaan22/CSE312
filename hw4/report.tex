@@ -1,0 +1,253 @@
+% Created 2021-06-25 Fri 18:22
+% Intended LaTeX compiler: pdflatex
+\documentclass[a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{grffile}
+\usepackage{longtable}
+\usepackage{wrapfig}
+\usepackage{rotating}
+\usepackage[normalem]{ulem}
+\usepackage{amsmath}
+\usepackage{textcomp}
+\usepackage{amssymb}
+\usepackage{capt-of}
+\usepackage{hyperref}
+\documentclass{article}
+\usepackage{here}
+\usepackage{xcolor}
+\usepackage[margin=3.0cm]{geometry}
+\usepackage{amsmath}
+\usepackage{parskip}
+\renewcommand\arraystretch{1.4}
+\usepackage[margin=1in]{geometry}
+\usepackage{minted}
+\usepackage{multicol}
+\usepackage{tikz}
+\usepackage{pgf}
+\definecolor{bg}{rgb}{0.95,0.95,0.95}
+\newminted{c}{fontsize=\footnotesize,frame=single,framesep=2mm}
+\newminted{text}{fontsize=\footnotesize,frame=single,framesep=2mm}
+\author{Fatih Kaan Salgır - 171044009}
+\date{}
+\title{CSE312 - Operating Systems - HW\#4}
+\hypersetup{
+ pdfauthor={Fatih Kaan Salgır - 171044009},
+ pdftitle={CSE312 - Operating Systems - HW\#4},
+ pdfkeywords={},
+ pdfsubject={},
+ pdfcreator={Emacs 27.2 (Org mode 9.4.6)}, 
+ pdflang={English}}
+\begin{document}
+
+\maketitle
+
+\section*{Design Explanation}
+\label{sec:orgd6e44a3}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=.9\linewidth]{org-img/Design_Explanation/2021-06-25_17-11-06_screenshot.png}
+\caption{Disk block alignments according to different block sizes.}
+\end{figure}
+
+
+Since there are lots of data blocks, data block area in the figure represents only 1\% of the whole data blocks in the disk.
+
+
+\subsection*{Creating an empty file system}
+\label{sec:orgb802c58}
+
+To test \texttt{makeFileSystem}, disk file in examined with \texttt{hexdump} command in linux. First part is the  contents of the super block. The second is Free Block Bitmap is the first blocks of the bitmap is marked as full, because root directory is marked as full in bitmap. And linked one after another in FAT Table.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=.9\linewidth]{org-img/Creating_an_empty_file_system/2021-06-25_17-33-35_screenshot.png}
+\caption{Testing \texttt{makeFileSystem} with 4KB block size}
+\end{figure}
+
+\newpage
+
+\subsection*{Super Block}
+\label{sec:org0aa5c65}
+
+Super block holds information about;
+\begin{itemize}
+\item block size,
+\item number of blocks,
+\item where the free bitmap, fat table root directory and data blocks starts and their sizes
+\item number of free blocks
+\end{itemize}
+
+\begin{ccode}
+// filesystem.h
+struct super_block {
+  uint32_t block_size;
+  uint32_t block_count;
+  uint32_t free_bitmap_start;
+  uint32_t free_block_size;
+  uint32_t no_free_blocks;
+  uint32_t fat_table_start;
+  uint32_t fat_table_block_size;
+  uint32_t root_start;
+  uint32_t root_size;
+  uint32_t data_start;
+  uint32_t data_size;
+};
+\end{ccode}
+
+
+
+\subsection*{Free Blocks}
+\label{sec:org796d34f}
+
+There are about 2\textsuperscript{12} data blocks (some of the blocks are reserved). In bitmap representation every data block is mapped to a bit. Therefore there must be 2\textsuperscript{12} bits in bitmap.
+\begin{flalign*}
+ & 2^{12} \mbox{ bits} = \frac{2^{12}}{2^{3}} \mbox{ bytes} = 512 \mbox{ bytes} &
+\end{flalign*}
+The bitmap fits inside a block, because the minimum block size is 512 bytes.
+During implementation of the filesytem bit maniplulation is needed. 
+Bitmap impelemented as \texttt{uint32\_t} array with size of 128 which is 2\textsuperscript{12} bits.
+
+\subsection*{FAT Table}
+\label{sec:org1d3420b}
+
+There are \(2^{12}\) entries and every entry is 12 bits. Therefore the table size;
+\begin{flalign*}
+ & \frac{2^{12} \times 12}{2^{3}} = 6 \times 2^{10} \mbox{ Bytes} = 6 \mbox{ KB} &
+\end{flalign*}
+So the number of blocks needed for FAT table depends on the block size.
+If the block size is 512 Bytes, then 12 blocks needed.
+On the other hand if the block size is 4 KB, then 1.5 blocks will be enough. To align properly numbers completed to integers. Final table is;
+
+
+\begin{table}[htbp]
+\caption{Number of blocks needed for FAT table, according to different block size}
+\centering
+\begin{tabular}{l|l|r}
+Block Size & FAT-12 & No blocks needed\\
+\hline
+\hline
+0.5 KB & 2MB & 12\\
+\hline
+1 KB & 4MB & 6\\
+\hline
+2 KB & 8MB & 3\\
+\hline
+4 KB & 16MB & 2\\
+\end{tabular}
+\end{table}
+
+
+\newpage
+
+\begin{ccode}
+// filesystem.h
+struct uint12 {
+  uint16_t x : 12;
+};
+typedef struct uint12 uint12;
+extern uint12 fat_table[NO_BLOCKS];
+\end{ccode}
+
+\subsection*{Directory Entry}
+\label{sec:org4ec3ae4}
+
+32 bytes used for each entry. Address is the block number. Attributes shows if the entry is file or directory. If the entry is a file then size shows how many bytes the file size. However if the entry is a directory, the size shows how many files/folders inside the directory. 
+
+Size of the directory can be reperesented with 3 bytes, since it doesn't exceed maximum file size in the file system. In order to store the size in 3 bytes, array with size 3 and \texttt{uint8\_t} type is used. \texttt{pack3b()} and \texttt{unpack3b()} functions are used to fit 32 bit integer into 24 bits.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=.9\linewidth]{org-img/Design_Explanation/2021-06-25_17-12-23_screenshot.png}
+\caption{Directory entries - number of bytes used}
+\end{figure}
+
+\begin{ccode}
+struct dir_entry {
+  char name[20];           // 20 bytes
+  uint16_t address;        // 2 bytes FAT-12 (used only least significant 12 bits)
+  uint8_t attr;            // 1 byte
+  uint8_t size[3];         // 3 bytes : max 16 MB size
+  uint8_t time[3];         // 3 bytes : HMS
+  uint8_t date[3];         // 3 bytes : DMY (Y: 1900+)
+} __attribute__((packed)); // required for struct to be exactly 32 bytes
+\end{ccode}
+
+
+\section*{Running \& Test Results}
+\label{sec:org1917176}
+
+File system manipulation functions are implemented in \texttt{fileSystemOper.c}.
+
+\begin{table}[htbp]
+\caption{Function names for corresponding operations}
+\centering
+\begin{tabular}{l|l}
+Operation & Function\\
+\hline
+dir & \texttt{fs\_dir()}\\
+mkdir & \texttt{fs\_mkdir()}\\
+rmdir & \texttt{fs\_rmdir()}\\
+dumpe2fs & \texttt{dumpe2fs()}\\
+write & \texttt{fs\_write()}\\
+read & \texttt{fs\_read()}\\
+del & \texttt{fs\_del()}\\
+\end{tabular}
+\end{table}
+
+\newpage
+
+
+Test cases in the assignment pdf
+
+\begin{textcode} 
+> ./makeFileSystem 4 mySystem.data
+> ./fileSystemOper mySystem.data mkdir '\usr'
+> ./fileSystemOper mySystem.data mkdir '\usr\ysa'
+> ./fileSystemOper mySystem.data mkdir '\bin\ysa'
+ERROR: Path is incorrect, couldn't find: bin
+> echo contents of linuxFile.data > linuxFile.data
+> ./fileSystemOper mySystem.data write '\usr\file2' linuxFile.data
+> ./fileSystemOper mySystem.data write '\file3' linuxFile.data
+> ./fileSystemOper mySystem.data dir '\'
+25-05-2021  18:07  <DIR>         usr
+25-05-2021  18:07            27  file3
+         1 File(s)         27 bytes
+         1 Dir(s)   16625664 bytes free
+> ./fileSystemOper mySystem.data del '\usr\ysa\file1'
+> ./fileSystemOper mySystem.data dump2fs
+==== SUPERBLOCK ====
+Block Size:            4096
+Block Count:           4096
+Free Bitmap Start:     4096
+Free Blocks Size:      4096
+Numer of Free Blocks:  4060
+FAT Table Start:       8192
+FAT Table Block Size:  2
+Root Start:            73728
+Root Size:             57344
+Data Start:            131072
+Data Size:             16646144
+====== BITMAP ======
+    0 : 1111111111111111 1101100000000000 0000000000000000 0000000000000000
+   64 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+  128 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+  192 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+  256 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+  320 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+  384 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+  448 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+...(truncated)
+====== OCCUPIED BLOCK - FILENAME ======
+16 - usr
+17 - ysa
+19 - file2
+20 - file3
+Total number of directories: 2
+Total number of files: 2
+> ./fileSystemOper mySystem.data read '\usr\file2' linuxFile2.data
+> cmp linuxFile2.data linuxFile.data
+\end{textcode} 
+\end{document}
