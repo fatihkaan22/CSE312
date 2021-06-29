@@ -7,7 +7,6 @@
 
 #include "filesystem.h"
 
-// TODO: header
 enum command { DIR, MKDIR, RMDIR, DUMPE2FS, WRITE, READ, DEL };
 
 struct oper {
@@ -50,9 +49,10 @@ bool check_params(struct oper op) {
     return (op.src != NULL);
   if (op.cmd == WRITE || op.cmd == READ)
     return (op.dst != NULL);
-  return 0; // TODO: u mean return true?
+  return 0;
 }
 
+// for debugging purposes
 void print_oper(struct oper op) {
   printf("op.cmd: %d\n", op.cmd);
   printf("op.src: %s\n", op.src);
@@ -98,12 +98,12 @@ void read_fattable() {
   }
 }
 
-
-// put into filesystem.h
+// returns the address of the given block
 uint32_t blk_addr(int block) {
   return (super_blk.root_start + (block * super_blk.block_size));
 }
 
+// finds the first available block from bitmap and returns
 int first_available_block() {
   for (int i = 0; i < NO_BLOCKS; ++i) {
     if (get_bit(free_bitmap, i) == 0)
@@ -113,19 +113,23 @@ int first_available_block() {
   return -1;
 }
 
+// pack uint32_t into 2 * uint8_t
 void pack_2b(uint32_t number, uint8_t arr[2]) { memcpy(arr, &number, 2); }
 
+// unpack 2 * uint8_t into uint32_t
 uint32_t unpack_2b(uint8_t arr[2]) {
   uint16_t number;
   memcpy(&number, arr, 2);
   return number;
 }
 
+// pack uint32_t into 3 * uint8_t
 void pack_3b(uint32_t number, uint8_t arr[3]) {
   number = number << 8;
   memcpy(arr, &number, 3);
 }
 
+// unpack 3 * uint8_t into uint32_t
 uint32_t unpack_3b(uint8_t arr[3]) {
   uint32_t number;
   memcpy(&number, arr, 3);
@@ -144,17 +148,17 @@ void set_datetime(uint8_t d[3], uint8_t t[3]) {
   d[2] = tm_struct->tm_year;
 }
 
+// read the directory into *d, at given address addr
 int read_dir_at(int addr, dir_entry *d) {
   fseek(fp, addr, SEEK_SET);
   fread(d, sizeof(dir_entry), 1, fp);
-  // TODO: consider restoring fp
   return 0;
 }
 
+// write the directory *d, to the given address addr
 int write_dir_at(int addr, const dir_entry *d) {
   fseek(fp, addr, SEEK_SET);
   fwrite(d, sizeof(dir_entry), 1, fp);
-  // TODO: consider restoring fp
   return 0;
 }
 
@@ -168,15 +172,12 @@ int follow_path(char *tokens[128], int no_tokens, dir_entry *last) {
     // current . entry of the directory: to obtain number of directories
     dir_entry d, parent;
     read_dir_at(addr, &parent);
-    /* printf("i:%d\n", i); */
-    /* printf("parent.size:%d\n", unpack_3b(parent.size)); */
     // first directory is the parent, so start with 1
     for (int j = 1; j < unpack_3b(parent.size) + 1; ++j) {
       // for every directory entry inside the current directory
       read_dir_at(addr + j * sizeof(dir_entry), &d);
       /* printf("checking: %s - %s\n", d.name, tokens[i]); */
       if (strcmp(d.name, tokens[i]) == 0) {
-        /* printf("FOUND\n"); */
         blk = d.address;
         addr = blk_addr(blk);
         if (last)
@@ -196,22 +197,22 @@ int follow_path(char *tokens[128], int no_tokens, dir_entry *last) {
 
 // adds the directory inside the given parent directory
 void add_dir_into(int parent_blk, dir_entry d) {
-  /* printf("ADD_DIR_INTO\n"); */
-  /* printf("d.name:%s\n", d.name); */
-  /* printf("parent_blk:%d \n", parent_blk); */
   dir_entry parent;
   read_dir_at(blk_addr(parent_blk), &parent);
-  /* printf("parent.size:%d\n", unpack_3b(parent.size)); */
   // increment no dirs of the parent
   int no_dirs = unpack_3b(parent.size);
-  /* printf("no_dirs:%d\n", no_dirs); */
   pack_3b(no_dirs + 1, parent.size);
-  /* printf("parent.name:%s\n", parent.name); */
-  /* printf("parent.size:%d\n", unpack_3b(parent.size)); */
   write_dir_at(blk_addr(parent_blk), &parent);
   // add the directory entry
-  // TODO: consdier the case if no_dirs > max size
-  fseek(fp, no_dirs * sizeof(dir_entry), SEEK_CUR);
+  // the case if no_dirs > max size
+  int i = parent_blk;
+  const int DIRS_PER_BLOCK = super_blk.block_size / sizeof(dir_entry) - 1;
+  while (no_dirs >= DIRS_PER_BLOCK) {
+    i = fat_table[i].x;
+    no_dirs -= DIRS_PER_BLOCK;
+    fseek(fp, blk_addr(i), SEEK_SET);
+  }
+  fseek(fp, (no_dirs) * sizeof(dir_entry), SEEK_CUR);
   fwrite(&d, sizeof(dir_entry), 1, fp);
 }
 
@@ -223,12 +224,21 @@ int parse_path(char *tokens[128], int *no_tokens, char *str) {
     tokens[(*no_tokens)++] = token;
     token = strtok(NULL, delims);
   }
-
-  /* for (int i = 0; i < no_tokens; ++i) { */
-  /*   printf(">%s\n", tokens[i]); */
-  /* } */
-
   return 0;
+}
+
+// returns true if there is already a file with 'filename' in the list of
+// directories
+bool file_exist(int parent_blk, const char *filename) {
+  dir_entry parent, d;
+  read_dir_at(blk_addr(parent_blk), &parent);
+  for (int i = 1; i < unpack_3b(parent.size) + 1; ++i) {
+    read_dir_at(blk_addr(parent_blk) + i * sizeof(dir_entry), &d);
+    if (strcmp(d.name, filename) == 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 int fs_mkdir(struct oper op) {
@@ -237,6 +247,10 @@ int fs_mkdir(struct oper op) {
   parse_path(tokens, &no_tokens, op.src);
   char *name = tokens[no_tokens - 1];
   int parent_blk = follow_path(tokens, no_tokens - 1, NULL);
+  if (file_exist(parent_blk, name)) {
+    fprintf(stdout, "ERROR: Directory exist in the file system: %s\n", op.src);
+    exit(EXIT_FAILURE);
+  }
   // find free block and mark as empty
   int block = first_available_block();
   fat_table[block].x = -1;
@@ -245,8 +259,6 @@ int fs_mkdir(struct oper op) {
 
   dir_entry d;
   strcpy(d.name, name);
-  /* printf("d.name:%s\n", d.name); */
-  /* printf("block:%d\n", block); */
   d.address = block;
   d.attr = ATTR_DIR;
   pack_3b(0, d.size);
@@ -263,12 +275,28 @@ int fs_dir(struct oper op) {
   int blk = follow_path(tokens, no_tokens, NULL);
   dir_entry parent;
   read_dir_at(blk_addr(blk), &parent);
+  if (parent.attr != ATTR_DIR) {
+    fprintf(stderr, "ERROR: Not a directory: %s\n", op.src);
+    exit(EXIT_FAILURE);
+  }
   int no_dirs = unpack_3b(parent.size);
 
   dir_entry d;
   int dir_count = 0;
   int total_size = 0;
+  int next = fat_table[blk].x;
+  int inside_block = 0;
+  const int DIRS_PER_BLOCK = super_blk.block_size / sizeof(dir_entry) - 1;
   for (int i = 0; i < no_dirs; ++i) {
+    if (inside_block >= DIRS_PER_BLOCK) {
+      if (next == NO_BLOCKS - 1) {
+        fprintf(stderr, "Something wrong: block is 0xFF\n");
+      }
+      fseek(fp, blk_addr(next), SEEK_SET);
+      next = fat_table[blk].x;
+      inside_block = 0;
+    }
+    inside_block++;
     fread(&d, sizeof(dir_entry), 1, fp);
     printf("%02d-%02d-%d  ", d.date[0], d.date[1], YEAR_START + d.date[2]);
     printf("%02d:%02d  ", d.time[0], d.time[1]);
@@ -284,7 +312,6 @@ int fs_dir(struct oper op) {
   printf("%10d File(s) %10d bytes\n", no_dirs - dir_count, total_size);
   printf("%10d Dir(s) %10d bytes free\n", dir_count,
          super_blk.no_free_blocks * super_blk.block_size);
-
   return 0;
 }
 
@@ -301,12 +328,54 @@ int fs_read(struct oper op) {
   dir_entry d;
   follow_path(tokens, no_tokens, &d);
   fseek(fp, blk_addr(d.address), SEEK_SET);
-  for (int i = 0; i < unpack_3b(d.size); ++i) {
-    char c;
+  int no_block_used = 1;
+  int current_blk = d.address;
+  char c;
+  for (size_t i = 0; i < unpack_3b(d.size); ++i) {
+    if (i >= (super_blk.block_size * no_block_used)) {
+      current_blk = fat_table[current_blk].x;
+      fseek(fp, blk_addr(current_blk), SEEK_SET);
+      no_block_used++;
+    }
     fread(&c, sizeof(char), 1, fp);
     fwrite(&c, sizeof(char), 1, dst_fp);
   }
   fclose(dst_fp);
+  return 0;
+}
+
+int fs_del(struct oper op) {
+  char *tokens[128];
+  int no_tokens;
+  parse_path(tokens, &no_tokens, op.src);
+  dir_entry del, d, parent;
+  int block = follow_path(tokens, no_tokens, &del);
+  if (del.attr != ATTR_FILE) {
+    fprintf(stderr, "ERROR: Not a directory: %s\n", op.src);
+    exit(EXIT_FAILURE);
+  }
+  // mark the data block as free
+  clear_bit(free_bitmap, block);
+  fat_table[block].x = 0;
+  super_blk.no_free_blocks++;
+  // delete the directory entry (shift entries if necessary)
+  int parent_blk = follow_path(tokens, no_tokens - 1, NULL);
+  read_dir_at(blk_addr(parent_blk), &parent);
+  bool shift = false;
+  for (int i = 1; i < unpack_3b(parent.size) + 1; ++i) {
+    read_dir_at(blk_addr(parent_blk) + i * sizeof(dir_entry), &d);
+    if (strcmp(del.name, d.name) == 0) {
+      shift = true;
+      i++;
+    }
+    if (shift) {
+      read_dir_at(blk_addr(parent_blk) + i * sizeof(dir_entry), &d);
+      write_dir_at(blk_addr(parent_blk) + (i - 1) * sizeof(dir_entry), &d);
+    }
+  }
+  // decrease number of directories inside the parent
+  pack_3b(unpack_3b(parent.size) - 1, parent.size);
+  write_dir_at(blk_addr(parent_blk), &parent);
   return 0;
 }
 
@@ -318,12 +387,18 @@ int fs_write(struct oper op) {
     exit(EXIT_FAILURE);
   }
 
-  // TODO: consider putting int one function w/ mkdir
   char *tokens[128];
   int no_tokens;
   parse_path(tokens, &no_tokens, op.src);
   char *name = tokens[no_tokens - 1];
   int parent_blk = follow_path(tokens, no_tokens - 1, NULL);
+  if (file_exist(parent_blk, name)) {
+    // overwrite the existing file
+    fs_del(op);
+    // or return error
+    /* fprintf(stdout, "ERROR: File exist in the file system: %s\n", op.src); */
+    /* return -1; */
+  }
   // find free block and mark as empty
   int block = first_available_block();
   /* printf("block:%d\n", block); */
@@ -333,11 +408,22 @@ int fs_write(struct oper op) {
   // write contents
   fseek(fp, blk_addr(block), SEEK_SET);
   char c;
-  int content_size = 0;
+  unsigned content_size = 0;
+  int no_block_used = 1;
+  int next_block, prev_block = block;
   while ((c = fgetc(dst_fp)) != EOF) {
-    /* printf("%c", c); */
     fwrite(&c, sizeof(c), 1, fp);
     content_size++;
+    // if block size exceed, allocate new one
+    if (content_size >= (no_block_used * super_blk.block_size)) {
+      next_block = first_available_block();
+      set_bit(free_bitmap, next_block);
+      fat_table[next_block].x = -1;
+      fat_table[prev_block].x = next_block;
+      super_blk.no_free_blocks--;
+      no_block_used++;
+      prev_block = next_block;
+    }
   }
   // register directory entry
   dir_entry d;
@@ -350,37 +436,6 @@ int fs_write(struct oper op) {
   return 0;
 }
 
-int fs_del(struct oper op) {
-  // TODO: all folders
-  char *tokens[128];
-  int no_tokens;
-  parse_path(tokens, &no_tokens, op.src);
-  dir_entry del, d, parent;
-  int block = follow_path(tokens, no_tokens, &del);
-  // mark the data block as free
-  clear_bit(free_bitmap, block);
-  super_blk.no_free_blocks++;
-  // delete the directory entry (shift entries if necessary)
-  int parent_blk = follow_path(tokens, no_tokens - 1, NULL);
-  read_dir_at(blk_addr(parent_blk), &parent);
-  bool shift = false;
-  for (int i = 1; i < unpack_3b(parent.size) + 1; ++i) {
-    read_dir_at(blk_addr(parent_blk) + i * sizeof(dir_entry), &d);
-    if (strcmp(del.name, d.name) == 0) {
-      shift = true;
-      i++;
-    }
-    if (shift) {
-      read_dir_at(blk_addr(parent_blk) + i * sizeof(dir_entry), &d);
-      write_dir_at(blk_addr(parent_blk) + (i - 1) * sizeof(dir_entry), &d);
-    }
-  }
-  // decrease number of directories inside the parent
-  pack_3b(unpack_3b(parent.size) - 1, parent.size);
-  write_dir_at(blk_addr(parent_blk), &parent);
-  return 0;
-}
-
 int fs_rmdir(struct oper op) {
   char *tokens[128];
   int no_tokens;
@@ -389,15 +444,16 @@ int fs_rmdir(struct oper op) {
   int block = follow_path(tokens, no_tokens, &del);
   if (del.attr != ATTR_DIR) {
     fprintf(stdout, "ERROR: Not a directory: %s\n", del.name);
-    return -1;
+    exit(EXIT_FAILURE);
   }
   read_dir_at(blk_addr(del.address), &d);
   if (unpack_3b(d.size) != 0) {
     fprintf(stdout, "ERROR: The directory is not empty.\n");
-    return -1;
+    exit(EXIT_FAILURE);
   }
   // mark the data block as free
   clear_bit(free_bitmap, block);
+  fat_table[block].x = 0;
   super_blk.no_free_blocks++;
   // delete the directory entry (shift entries if necessary)
   int parent_blk = follow_path(tokens, no_tokens - 1, NULL);
@@ -420,6 +476,7 @@ int fs_rmdir(struct oper op) {
   return 0;
 }
 
+// prints the filename and occupied blocks for dumpe2fs 
 void print_filesystem(int blk, int *no_dir, int *no_file) {
   int addr = blk_addr(blk);
   dir_entry parent, d;
@@ -427,7 +484,15 @@ void print_filesystem(int blk, int *no_dir, int *no_file) {
   for (int i = 1; i < unpack_3b(parent.size) + 1; ++i) {
     fread(&d, sizeof(dir_entry), 1, fp);
     read_dir_at(addr + i * sizeof(dir_entry), &d);
-    printf("%d - %s\n", d.address, d.name);
+    printf("%-15s : ", d.name);
+    printf("%d ", d.address);
+    // iterate over the fat table for the rest of the blocks
+    int i = d.address;
+    while (fat_table[i].x != NO_BLOCKS - 1) { // check if it is 0xFF
+      i = fat_table[i].x;
+      printf("%d ", i);
+    }
+    puts("");
     if (d.attr == ATTR_DIR) {
       (*no_dir)++;
       print_filesystem(d.address, no_dir, no_file);
@@ -440,16 +505,14 @@ void print_filesystem(int blk, int *no_dir, int *no_file) {
 int dumpe2fs() {
   print_superblock();
   print_bitmap(free_bitmap);
-  // TODO: print files: hexdump way?
   int no_dir, no_file;
   no_dir = no_file = 0;
-  printf("====== OCCUPIED BLOCK - FILENAME ======\n");
+  printf("====== FILENAME : OCCUPIED BLOCKS ======\n");
   print_filesystem(2, &no_dir, &no_file); // roots block
   printf("Total number of directories: %d\n", no_dir);
   printf("Total number of files: %d\n", no_file);
   return 0;
 }
-
 
 int main(int argc, char *argv[]) {
   char *filesystem_path;
@@ -473,8 +536,6 @@ int main(int argc, char *argv[]) {
   }
 
   /* print_oper(op); */
-
-  // -----------------------------------
 
   read_superblock();
   read_bitmap();
