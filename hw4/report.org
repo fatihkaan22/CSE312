@@ -10,30 +10,46 @@
 #+LATEX_HEADER: \usepackage{pgf}
 #+LATEX_HEADER: \definecolor{bg}{rgb}{0.95,0.95,0.95}
 #+LATEX_HEADER: \newminted{c}{fontsize=\footnotesize,frame=single,framesep=2mm}
-#+LATEX_HEADER: \newminted{text}{fontsize=\footnotesize,frame=single,framesep=2mm}
+#+LATEX_HEADER: \newminted{text}{fontsize=\footnotesize,frame=single,framesep=2mm,breaklines}
 
 
 # #+ATTR_LATEX: :font \ttfamily{}
 
 * Design Explanation
 
+  \quad
+
 #+attr_org: :width 400px
+#+attr_latex: :width 400px
 #+caption: Disk block alignments according to different block sizes.
 [[file:org-img/Design_Explanation/2021-06-25_17-11-06_screenshot.png]]
 
+  \quad
 
 Since there are lots of data blocks, data block area in the figure represents only 1% of the whole data blocks in the disk.
  
+=filesystem.h= has the functions, constans and variables that is used in both =makeFileSystem.c= and =fileSystemOper.c=. Global variables inside =filesystem.h=;
+\quad
+
+\begin{ccode}
+extern FILE *fp;
+extern struct super_block super_blk;
+extern uint32_t free_bitmap[BITMAP_WORD_SIZE];
+extern uint12 fat_table[NO_BLOCKS];
+\end{ccode}
+
 
 ** Creating an empty file system
 
   To test =makeFileSystem=, disk file in examined with =hexdump= command in linux. First part is the  contents of the super block. The second is Free Block Bitmap is the first blocks of the bitmap is marked as full, because root directory is marked as full in bitmap. And linked one after another in FAT Table.
 
 #+attr_org: :width 400px
+#+attr_latex: :width 400px
 #+caption: Testing =makeFileSystem= with 4KB block size
 [[file:org-img/Creating_an_empty_file_system/2021-06-25_17-33-35_screenshot.png]]
  
 \newpage
+\quad
  
 ** Super Block
 
@@ -71,6 +87,8 @@ struct super_block {
 The bitmap fits inside a block, because the minimum block size is 512 bytes.
 During implementation of the filesytem bit maniplulation is needed. 
 Bitmap impelemented as =uint32_t= array with size of 128 which is 2^{12} bits.
+
+=get_bit()=, =set_bit()= and =clear_bit()= functions are implemented to abstract away the implementation details.
  
 ** FAT Table
 
@@ -96,8 +114,11 @@ On the other hand if the block size is 4 KB, then 1.5 blocks will be enough. To 
 |------------+--------+------------------|
 | 4 KB       | 16MB   |                2 |
 
+\quad
 
-\newpage
+When the file is long enough to exceed the capacity of a single block, a new available block will be found with help of bitmap. Current entry of the FAT Table linked to this new block. And the new block will get the value -1 (0xFFF).
+
+Same thing holds when a directory run out of directory entries (Number of directory entry of a block can hold varies depending on the block size).
 
 \begin{ccode}
 // filesystem.h
@@ -110,13 +131,18 @@ extern uint12 fat_table[NO_BLOCKS];
 
 ** Directory Entry
 
-   32 bytes used for each entry. Address is the block number. Attributes shows if the entry is file or directory. If the entry is a file then size shows how many bytes the file size. However if the entry is a directory, the size shows how many files/folders inside the directory. 
+   32 bytes used for each entry. Address is the block number of the first block. Attributes shows if the entry is file or directory. If the entry is a file then size shows how many bytes the file size. However if the entry is a directory, the size shows how many files/folders inside the directory. 
 
    Size of the directory can be reperesented with 3 bytes, since it doesn't exceed maximum file size in the file system. In order to store the size in 3 bytes, array with size 3 and =uint8_t= type is used. =pack3b()= and =unpack3b()= functions are used to fit 32 bit integer into 24 bits.
 
+\quad
+
 #+attr_org: :width 400px
+#+attr_latex: :width 400px
 #+caption: Directory entries - number of bytes used
 [[file:org-img/Design_Explanation/2021-06-25_17-12-23_screenshot.png]]
+
+\newpage
  
 \begin{ccode}
 struct dir_entry {
@@ -127,6 +153,8 @@ struct dir_entry {
   uint8_t time[3];         // 3 bytes : HMS
   uint8_t date[3];         // 3 bytes : DMY (Y: 1900+)
 } __attribute__((packed)); // required for struct to be exactly 32 bytes
+
+typedef struct dir_entry dir_entry;
 \end{ccode}
 
 
@@ -135,65 +163,78 @@ struct dir_entry {
 File system manipulation functions are implemented in =fileSystemOper.c=.
 
 #+caption: Function names for corresponding operations
-| Operation | Function   |
-|-----------+------------|
-| /         | <          |
-| dir       | =fs_dir()=   |
-| mkdir     | =fs_mkdir()= |
-| rmdir     | =fs_rmdir()= |
-| dumpe2fs  | =dumpe2fs()= |
-| write     | =fs_write()= |
-| read      | =fs_read()=  |
-| del       | =fs_del()=   |
+| Operation | Function   | Notes                                                        |
+|-----------+------------+--------------------------------------------------------------|
+|-----------+------------+--------------------------------------------------------------|
+| /         | <          | <                                                            |
+| dir       | =fs_dir()=   | - prints error if the target is not a directory              |
+|-----------+------------+--------------------------------------------------------------|
+| mkdir     | =fs_mkdir()= | - prints error if the prior path doesn't exist               |
+|           |            | - prints error if the directory already exist                |
+|-----------+------------+--------------------------------------------------------------|
+| rmdir     | =fs_rmdir()= | - prints error if the target is not a directory              |
+|           |            | - prints error if the directory has files/directories inside |
+|-----------+------------+--------------------------------------------------------------|
+| dumpe2fs  | =dumpe2fs()= | - prints superblock, free bitmap, occupied blocks            |
+|-----------+------------+--------------------------------------------------------------|
+| write     | =fs_write()= | - if file exists in the file system, overwrites              |
+|           |            | - if the linux file doesn't exist, prints error              |
+|-----------+------------+--------------------------------------------------------------|
+| read      | =fs_read()=  | - if the linuxfile exits, overwrites                         |
+|-----------+------------+--------------------------------------------------------------|
+| del       | =fs_del()=   | - if the target is a directory, it will print error          |
 
-\newpage
+  \newpage
 
+Test cases in the assignment pdf:
 
-Test cases in the assignment pdf
+- Long file content is used to demonstrate multiple number of blocks used for a single file.
+- Middle part of the =dumpe2fs= is trunctaed for readibility.
+
 
 \begin{textcode} 
-> ./makeFileSystem 4 mySystem.data
+> ./makeFileSystem 0.5 mySystem.data
 > ./fileSystemOper mySystem.data mkdir '\usr'
 > ./fileSystemOper mySystem.data mkdir '\usr\ysa'
 > ./fileSystemOper mySystem.data mkdir '\bin\ysa'
 ERROR: Path is incorrect, couldn't find: bin
-> echo contents of linuxFile.data > linuxFile.data
+> echo 'Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.
+
+Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.' > linuxFile.data
 > ./fileSystemOper mySystem.data write '\usr\file2' linuxFile.data
 > ./fileSystemOper mySystem.data write '\file3' linuxFile.data
 > ./fileSystemOper mySystem.data dir '\'
-25-05-2021  18:07  <DIR>         usr
-25-05-2021  18:07            27  file3
-         1 File(s)         27 bytes
-         1 Dir(s)   16625664 bytes free
+26-05-2021  19:18  <DIR>         usr
+26-05-2021  19:18           594  file3
+         1 File(s)        594 bytes
+         1 Dir(s)    2076672 bytes free
 > ./fileSystemOper mySystem.data del '\usr\ysa\file1'
 > ./fileSystemOper mySystem.data dump2fs
 ==== SUPERBLOCK ====
-Block Size:            4096
+Block Size:            512
 Block Count:           4096
-Free Bitmap Start:     4096
+Free Bitmap Start:     512
 Free Blocks Size:      4096
-Numer of Free Blocks:  4060
-FAT Table Start:       8192
-FAT Table Block Size:  2
-Root Start:            73728
-Root Size:             57344
-Data Start:            131072
-Data Size:             16646144
+Numer of Free Blocks:  4057
+FAT Table Start:       4608
+FAT Table Block Size:  12
+Root Start:            12800
+Root Size:             7168
+Data Start:            19968
+Data Size:             2080768
 ====== BITMAP ======
-    0 : 1111111111111111 1101100000000000 0000000000000000 0000000000000000
+    0 : 1111111111111111 1101111100000000 0000000000000000 0000000000000000
    64 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
   128 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
   192 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
-  256 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
-  320 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
-  384 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
-  448 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
 ...(truncated)
-====== OCCUPIED BLOCK - FILENAME ======
-16 - usr
-17 - ysa
-19 - file2
-20 - file3
+ 3968 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+ 4032 : 0000000000000000 0000000000000000 0000000000000000 0000000000000000
+====== FILENAME : OCCUPIED BLOCKS ======
+usr             : 16 
+ysa             : 17 
+file2           : 20 21 
+file3           : 22 23 
 Total number of directories: 2
 Total number of files: 2
 > ./fileSystemOper mySystem.data read '\usr\file2' linuxFile2.data
