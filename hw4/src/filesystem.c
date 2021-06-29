@@ -60,7 +60,6 @@ void write_bitmap() {
 
 void write_fattable() {
   fseek(fp, super_blk.fat_table_start, SEEK_SET);
-  // TODO: seekset to fattable block just in case
   if (fwrite(fat_table, sizeof(uint12), NO_BLOCKS, fp) != NO_BLOCKS) {
     fprintf(stderr, "ERROR: fwrite()\n");
     exit(EXIT_FAILURE);
